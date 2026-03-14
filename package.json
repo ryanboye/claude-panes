@@ -1,0 +1,26 @@
+{
+  "name": "claude-panes",
+  "version": "0.1.0",
+  "description": "Multi-pane Claude CLI terminal manager for Mac",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "npm run build && electron .",
+    "build": "tsc && node scripts/build-renderer.js",
+    "postinstall": "electron-builder install-app-deps",
+    "dist": "npm run build && electron-builder --mac",
+    "rebuild-pty": "npx @electron/rebuild -f -w node-pty"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "js-yaml": "^4.1.0",
+    "node-pty": "^1.0.0"
+  }
+}

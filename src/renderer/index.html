@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'">
+  <title>Claude Panes</title>
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Draggable title bar area (for frameless mac window) -->
+    <div class="title-bar-drag"></div>
+
+    <!-- Reserved for system banners -->
+    <div id="cost-warning" style="display:none"></div>
+
+    <div id="main-container">
+      <!-- Left sidebar: project rail -->
+      <div id="sidebar"></div>
+      <div id="sidebar-handle" class="resize-handle resize-handle-vertical"></div>
+
+      <!-- Empty state (shown when no project selected) -->
+      <div id="empty-state">
+        <h2>Claude Panes</h2>
+        <p>Select a project from the sidebar or press <kbd>Cmd+N</kbd> to add one</p>
+      </div>
+
+      <!-- Workspace: split pane terminal area -->
+      <div id="workspace"></div>
+
+      <div id="panel-handle" class="resize-handle resize-handle-vertical"></div>
+      <!-- Context panel: tasks, research, artifacts, activity feed -->
+      <div id="context-panel">
+        <div class="panel-section">
+          <div class="panel-section-header">Tasks</div>
+          <div id="tasks-list"></div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-section-header">Research</div>
+          <div id="research-content"></div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-section-header">Artifacts</div>
+          <div id="artifacts-list"></div>
+        </div>
+        <div class="panel-section panel-section-feed">
+          <div class="panel-section-header feed-header">
+            <span>Activity</span>
+            <span id="feed-badge" class="feed-badge" style="display:none">0</span>
+            <span class="feed-header-actions">
+              <button id="feed-ack-all-crit" class="feed-bulk-btn" title="Acknowledge all critical">[ack all crit]</button>
+              <button id="feed-ack-all" class="feed-bulk-btn" title="Acknowledge all">[ack all]</button>
+              <button id="feed-clear" class="feed-bulk-btn" title="Clear all">[clear]</button>
+            </span>
+          </div>
+          <div id="feed-filters" class="feed-filters">
+            <button class="feed-filter-btn feed-filter-active" data-severity="all" title="All">all</button>
+            <button class="feed-filter-btn feed-filter-active" data-severity="critical" title="Critical"><span class="feed-dot feed-dot-critical"></span></button>
+            <button class="feed-filter-btn feed-filter-active" data-severity="warn" title="Warnings"><span class="feed-dot feed-dot-warn"></span></button>
+            <button class="feed-filter-btn feed-filter-active" data-severity="info" title="Info"><span class="feed-dot feed-dot-info"></span></button>
+            <button class="feed-filter-btn feed-filter-active" data-severity="success" title="Success"><span class="feed-dot feed-dot-success"></span></button>
+          </div>
+          <div id="activity-feed"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status bar -->
+    <div id="status-bar"></div>
+
+    <!-- Context menu (role assignment, pane actions) -->
+    <div id="context-menu"></div>
+  </div>
+
+  <!-- xterm.js loaded from node_modules -->
+  <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

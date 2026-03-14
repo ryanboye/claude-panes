@@ -1,0 +1,15 @@
+appId: com.claude-panes.app
+productName: Claude Panes
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+files:
+  - dist/**/*
+  - node_modules/**/*
+  - "!node_modules/*/{CHANGELOG.md,README.md,readme.md,README,readme}"
+directories:
+  output: release
