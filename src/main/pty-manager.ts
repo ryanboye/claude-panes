@@ -13,14 +13,17 @@ export interface PtySession {
   projectId: string;
   pty: IPty;
   alive: boolean;
-  outputBuffer: string[];  // ring buffer for reattach
+  outputBuffer: string[];  // raw chunk ring buffer for reattach (preserves ANSI)
+  outputBufferBytes: number; // track total byte size
   spawnedAt: number;       // Date.now() at spawn time
   role: string;            // agent role (or 'default')
   onData?: (data: string) => void;
   onExit?: (code: number) => void;
 }
 
-const OUTPUT_BUFFER_MAX_LINES = 10000;
+// Cap buffer at ~2MB of raw output — enough for a full terminal session
+// while preventing unbounded memory growth
+const OUTPUT_BUFFER_MAX_BYTES = 2 * 1024 * 1024;
 
 function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
@@ -80,17 +83,20 @@ export class PtyManager {
         pty: term,
         alive: true,
         outputBuffer: [],
+        outputBufferBytes: 0,
         spawnedAt: Date.now(),
         role: opts.role ?? 'default',
       };
 
       // Wire output with 16ms batching to prevent IPC flood
       term.onData((data: string) => {
-        // Add to ring buffer
-        const lines = data.split('\n');
-        session.outputBuffer.push(...lines);
-        if (session.outputBuffer.length > OUTPUT_BUFFER_MAX_LINES) {
-          session.outputBuffer.splice(0, session.outputBuffer.length - OUTPUT_BUFFER_MAX_LINES);
+        // Store raw chunks (preserving ANSI escape codes intact)
+        session.outputBuffer.push(data);
+        session.outputBufferBytes += data.length;
+        // Evict oldest chunks when over byte limit
+        while (session.outputBufferBytes > OUTPUT_BUFFER_MAX_BYTES && session.outputBuffer.length > 1) {
+          const removed = session.outputBuffer.shift()!;
+          session.outputBufferBytes -= removed.length;
         }
 
         // Batch output
@@ -175,10 +181,11 @@ export class PtyManager {
 
   /**
    * Get buffered output for reattach after project switch.
+   * Returns raw concatenated chunks with ANSI codes preserved.
    */
   getOutputBuffer(projectId: string, paneId: string): string {
     const session = this.sessions.get(this.makeKey(projectId, paneId));
-    return session?.outputBuffer.join('\n') ?? '';
+    return session?.outputBuffer.join('') ?? '';
   }
 
   getAllSessions(): Map<string, PtySession> {
@@ -188,9 +195,12 @@ export class PtyManager {
   getLastOutputLine(key: string): string {
     const session = this.sessions.get(key);
     if (!session) return '';
-    // Walk buffer backwards to find last non-empty line
-    for (let i = session.outputBuffer.length - 1; i >= 0; i--) {
-      const line = stripAnsi(session.outputBuffer[i]).trim();
+    // Concatenate recent chunks and split by newline to find last non-empty line
+    // Only check last few chunks to avoid processing the entire buffer
+    const recentChunks = session.outputBuffer.slice(-20).join('');
+    const lines = recentChunks.split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = stripAnsi(lines[i]).trim();
       if (line.length > 0) return line;
     }
     return '';
