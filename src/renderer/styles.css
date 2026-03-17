@@ -86,9 +86,19 @@ html, body {
   overflow: hidden;
 }
 
+/* ─── Workspace Area (workspace + panel wrapper) ─────────────── */
+
+#workspace-area {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* ─── Panel position flip ───────────────────────────────────── */
 
-#main-container.panel-bottom {
+#main-container.panel-bottom #workspace-area {
   flex-direction: column;
 }
 
@@ -96,10 +106,17 @@ html, body {
   width: 100%;
   height: 200px;
   min-height: 120px;
+  max-width: none;
   border-left: none;
   border-top: 1px solid var(--border-color);
   flex-direction: row;
   overflow-x: auto;
+}
+
+#main-container.panel-bottom #panel-handle {
+  width: 100%;
+  height: var(--handle-size);
+  cursor: row-resize;
 }
 
 #main-container.panel-bottom #context-panel .panel-section {
@@ -107,16 +124,32 @@ html, body {
   flex: 1;
 }
 
-@media (max-width: 1200px) {
-  #main-container:not(.panel-right-override) {
+/* Responsive: flip panel to full-width bottom at narrow window */
+@media (max-width: 1000px) {
+  #workspace-area {
     flex-direction: column;
   }
-  #main-container:not(.panel-right-override) #context-panel {
-    width: 100%;
-    height: 200px;
+
+  #context-panel {
+    width: 100% !important;
+    max-width: none !important;
+    height: 180px;
+    min-height: 100px;
     border-left: none;
     border-top: 1px solid var(--border-color);
     flex-direction: row;
+    overflow-x: auto;
+  }
+
+  #context-panel .panel-section {
+    min-width: 200px;
+    flex: 1;
+  }
+
+  #panel-handle {
+    width: 100%;
+    height: var(--handle-size);
+    cursor: row-resize;
   }
 }
 
@@ -125,32 +158,41 @@ html, body {
 #sidebar {
   width: var(--sidebar-width);
   min-width: 36px;
-  max-width: 240px;
+  max-width: 280px;
   background: var(--bg-sidebar);
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 8px 0;
-  border-right: none;
+  border-right: 1px solid var(--border-color);
   -webkit-app-region: drag;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 #sidebar > * {
   -webkit-app-region: no-drag;
 }
 
+/* ── Logo ── */
+
 .sidebar-logo {
+  width: 36px;
+  height: 36px;
   font-size: 20px;
   color: var(--accent);
   cursor: pointer;
-  padding: 4px 0 8px;
   border-radius: 8px;
   transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-panel);
 }
 
 .sidebar-logo:hover {
-  background: var(--border-color);
+  background: var(--bg-tertiary);
 }
 
 .sidebar-logo-active {
@@ -158,12 +200,45 @@ html, body {
   color: white;
 }
 
+#sidebar.sidebar-expanded .sidebar-logo {
+  width: auto;
+  align-self: stretch;
+  margin: 0 6px;
+}
+
+/* ── Header (expanded only) ── */
+
+.sidebar-header {
+  display: none;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  padding: 8px 12px 4px;
+  align-self: stretch;
+}
+
+#sidebar.sidebar-expanded .sidebar-header {
+  display: block;
+}
+
+/* ── Divider ── */
+
 .sidebar-divider {
   width: 24px;
   height: 1px;
   background: var(--border-color);
   margin-bottom: 8px;
+  flex-shrink: 0;
 }
+
+#sidebar.sidebar-expanded .sidebar-divider {
+  width: 100%;
+  margin: 0 0 4px;
+}
+
+/* ── Project list ── */
 
 .sidebar-projects {
   flex: 1;
@@ -173,7 +248,15 @@ html, body {
   gap: 4px;
   overflow-y: auto;
   padding: 0 4px;
+  width: 100%;
 }
+
+#sidebar.sidebar-expanded .sidebar-projects {
+  align-items: stretch;
+  padding: 0 6px;
+}
+
+/* ── Project item — compact (default, narrow sidebar) ── */
 
 .sidebar-project {
   width: 36px;
@@ -181,64 +264,118 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 0;
   cursor: pointer;
   border-radius: 8px;
   position: relative;
-  transition: border-radius 0.15s;
+  transition: background 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+  background: var(--bg-panel);
 }
 
 .sidebar-project:hover {
-  border-radius: 12px;
+  background: var(--bg-tertiary);
 }
 
 .sidebar-project-active {
-  border-radius: 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--accent);
 }
 
 .sidebar-project-active::before {
   content: '';
   position: absolute;
-  left: -6px;
+  left: -4px;
   top: 50%;
   transform: translateY(-50%);
   width: 3px;
-  height: 20px;
+  height: 16px;
   background: var(--accent);
   border-radius: 0 2px 2px 0;
 }
 
-.sidebar-project-badge {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  font-size: 14px;
-  color: white;
-  transition: border-radius 0.15s, opacity 0.4s ease;
+/* Status dot — subtle color indicator */
+.sidebar-project-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+  display: none;
 }
 
-.sidebar-project:hover .sidebar-project-badge {
-  border-radius: 12px;
+/* Abbreviation (compact mode) */
+.sidebar-project-abbr {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+  line-height: 1;
 }
 
-/* Drag-to-detach states */
-.sidebar-badge-dragging {
+/* Full name (expanded mode) */
+.sidebar-project-name {
+  display: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Relative time (expanded mode) */
+.sidebar-project-time {
+  display: none;
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* ── Project item — expanded (wide sidebar) ── */
+
+#sidebar.sidebar-expanded .sidebar-project {
+  width: auto;
+  height: auto;
+  padding: 8px 10px;
+  gap: 8px;
+  justify-content: flex-start;
+}
+
+#sidebar.sidebar-expanded .sidebar-project-dot {
+  display: block;
+}
+
+#sidebar.sidebar-expanded .sidebar-project-abbr {
+  display: none;
+}
+
+#sidebar.sidebar-expanded .sidebar-project-name {
+  display: block;
+}
+
+#sidebar.sidebar-expanded .sidebar-project-time {
+  display: block;
+}
+
+#sidebar.sidebar-expanded .sidebar-project-active::before {
+  left: -6px;
+  height: 20px;
+}
+
+/* ── Activity / idle states ── */
+
+.sidebar-project-idle {
   opacity: 0.4;
-  transform: scale(0.9);
 }
 
-/* Fade icon when no agents are actively burning tokens */
-.sidebar-project-idle .sidebar-project-badge {
-  opacity: 0.35;
-  transition: opacity 0.4s ease;
+.sidebar-project-idle .sidebar-project-dot {
+  background: var(--text-muted);
 }
 
-.sidebar-project-detached .sidebar-project-badge {
-  opacity: 0.35;
-  border: 1px dashed rgba(255, 255, 255, 0.25);
+.sidebar-project-detached {
+  opacity: 0.5;
 }
 
 .sidebar-project-detached::after {
@@ -246,45 +383,90 @@ html, body {
   position: absolute;
   right: 2px;
   bottom: 2px;
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--accent);
   border: 1px solid var(--bg-sidebar);
 }
 
+/* Drag-to-detach states */
+.sidebar-badge-dragging {
+  opacity: 0.4;
+  transform: scale(0.95);
+}
+
 .sidebar-drag-ghost {
   width: 32px;
   height: 32px;
-  border-radius: 12px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 600;
-  font-size: 14px;
-  color: white;
-  opacity: 0.85;
-  transform: scale(1.15);
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  opacity: 0.9;
   filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5));
 }
 
+/* ── Bottom buttons ── */
+
+.sidebar-bottom-btns {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 4px 0;
+  border-top: 1px solid var(--border-color);
+  margin-top: 4px;
+  width: 100%;
+}
+
+#sidebar.sidebar-expanded .sidebar-bottom-btns {
+  align-items: stretch;
+  padding: 4px 6px;
+}
+
 .sidebar-add {
-  width: 36px;
-  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 0;
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 20px;
-  border-radius: 8px;
-  margin-top: 4px;
+  border-radius: 6px;
+  padding: 6px;
+  flex-shrink: 0;
   transition: color 0.15s, background 0.15s;
+}
+
+.sidebar-add-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.sidebar-add-label {
+  display: none;
+  font-size: 11px;
+}
+
+#sidebar.sidebar-expanded .sidebar-add {
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+}
+
+#sidebar.sidebar-expanded .sidebar-add-label {
+  display: inline;
 }
 
 .sidebar-add:hover {
   color: var(--text-primary);
-  background: var(--border-color);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 /* ─── Workspace (pane area) ─────────────────────────────────── */
@@ -865,6 +1047,27 @@ body.pane-resizing .pane-terminal {
   color: var(--text-secondary);
 }
 
+.status-panel-toggle {
+  cursor: pointer;
+  user-select: none;
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 0 5px;
+  line-height: 16px;
+}
+
+.status-panel-toggle:hover {
+  color: var(--text-secondary);
+  border-color: var(--text-muted);
+}
+
+.status-panel-toggle.panel-hidden {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
 /* ─── Context Menu ──────────────────────────────────────────── */
 
 #context-menu {
@@ -1202,23 +1405,33 @@ body.panel-resizing iframe {
 /* ─── Canvas Layout ────────────────────────────────────────── */
 
 .home-canvas {
-  position: relative;
   overflow: auto;
   flex: 1;
   min-height: 0;
   width: 100%;
+  padding: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+  grid-auto-rows: min-content;
+  gap: 16px;
+  align-content: start;
   background:
     radial-gradient(circle, #2a2a4a 1px, transparent 1px);
   background-size: 24px 24px;
 }
 
+@media (max-width: 400px) {
+  .home-canvas {
+    padding: 10px;
+    gap: 10px;
+  }
+}
+
 /* ─── Canvas Card ──────────────────────────────────────────── */
 
 .canvas-card {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 300px;
+  width: 100%;
+  min-width: 0;
   background: var(--bg-secondary);
   border-radius: 10px;
   border: 2px solid var(--border-color);
@@ -1277,13 +1490,9 @@ body.panel-resizing iframe {
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  cursor: grab;
+  cursor: pointer;
   user-select: none;
   background: rgba(0, 0, 0, 0.15);
-}
-
-.canvas-card-titlebar:active {
-  cursor: grabbing;
 }
 
 .canvas-card-dots {
@@ -1333,15 +1542,15 @@ body.panel-resizing iframe {
 .canvas-card-preview {
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
   font-size: 10px;
-  line-height: 1.5;
+  line-height: 1.4;
   background: var(--bg-primary);
-  padding: 10px;
+  padding: 8px 10px;
   margin: 0;
   overflow: hidden;
-  flex: 1;
-  min-height: 200px;
+  height: 52px;
+  max-height: 52px;
   border-radius: 0;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -1349,10 +1558,73 @@ body.panel-resizing iframe {
 /* ─── Card Stats ───────────────────────────────────────────── */
 
 .canvas-card-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
   font-size: 10px;
-  color: var(--text-muted);
-  padding: 6px 10px;
   font-variant-numeric: tabular-nums;
+}
+
+.canvas-card-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.canvas-card-stat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+}
+
+.canvas-card-stat-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.canvas-card-stat-value {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.canvas-card-stat-value.stat-active {
+  color: var(--accent);
+}
+
+.canvas-card-stat-value.stat-cost {
+  color: var(--warning);
+}
+
+.canvas-card-stat-value.stat-tokens {
+  color: var(--role-researcher);
+}
+
+/* Mini histogram bar */
+.canvas-card-histogram {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 20px;
+  flex: 1;
+  min-width: 0;
+}
+
+.canvas-card-histogram-bar {
+  flex: 1;
+  min-width: 0;
+  border-radius: 1px 1px 0 0;
+  background: var(--accent);
+  opacity: 0.6;
+  transition: height 0.3s ease;
+}
+
+.canvas-card-histogram-bar.bar-idle {
+  background: var(--text-muted);
+  opacity: 0.25;
 }
 
 /* ─── Card Input ───────────────────────────────────────────── */

@@ -21,18 +21,20 @@
       <div id="sidebar"></div>
       <div id="sidebar-handle" class="resize-handle resize-handle-vertical"></div>
 
-      <!-- Empty state (shown when no project selected) -->
-      <div id="empty-state">
-        <h2>Claude Panes</h2>
-        <p>Select a project from the sidebar or press <kbd>Cmd+N</kbd> to add one</p>
-      </div>
+      <!-- Workspace + panel area (wraps so panel can flip to bottom) -->
+      <div id="workspace-area">
+        <!-- Empty state (shown when no project selected) -->
+        <div id="empty-state">
+          <h2>Claude Panes</h2>
+          <p>Select a project from the sidebar or press <kbd>Cmd+N</kbd> to add one</p>
+        </div>
 
-      <!-- Workspace: split pane terminal area -->
-      <div id="workspace"></div>
+        <!-- Workspace: split pane terminal area -->
+        <div id="workspace"></div>
 
-      <div id="panel-handle" class="resize-handle resize-handle-vertical"></div>
-      <!-- Context panel: tasks, research, artifacts, activity feed -->
-      <div id="context-panel">
+        <div id="panel-handle" class="resize-handle resize-handle-vertical"></div>
+        <!-- Context panel: tasks, research, artifacts, activity feed -->
+        <div id="context-panel">
         <div class="panel-section">
           <div class="panel-section-header">Tasks</div>
           <div id="tasks-list"></div>
@@ -65,6 +67,7 @@
           <div id="activity-feed"></div>
         </div>
       </div>
+      </div><!-- /workspace-area -->
     </div>
 
     <!-- Status bar -->

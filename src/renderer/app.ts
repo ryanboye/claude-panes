@@ -159,12 +159,22 @@ async function init(): Promise<void> {
     await initSidebar(sidebarEl, {
       onSelectProject: openProject,
       onAddProject: addProject,
+      onCreateProject: createProject,
       onHomeClick: showHomeScreen,
     });
 
     // Listen for project reattach events
     api.window.onProjectReattached(() => {
       updateDetachedState();
+    });
+
+    // When a project is detached into its own window, stop showing it here
+    api.on('project:detached', (projectPath: unknown) => {
+      updateDetachedState();
+      if (currentProjectPath === projectPath) {
+        // The active project was just detached — go to home screen
+        showHomeScreen();
+      }
     });
   }
 
@@ -247,7 +257,7 @@ async function openProjectDetached(projectPath: string): Promise<void> {
   emptyState.style.display = 'none';
   workspaceEl.style.display = '';
   panelEl.style.display = panelVisible ? '' : 'none';
-  panelHandle.style.display = '';
+  panelHandle.style.display = panelVisible ? '' : 'none';
 
   // Render workspace using reattach (PTYs are already running from main window)
   renderWorkspaceDetached();
@@ -299,13 +309,25 @@ function renderWorkspaceDetached(): void {
 async function addProject(): Promise<void> {
   const entry = await api.project.add();
   if (entry) {
-    await refreshProjects(sidebarEl, {
-      onSelectProject: openProject,
-      onAddProject: addProject,
-      onHomeClick: showHomeScreen,
-    });
-    openProject(entry.path);
+    await refreshSidebarAndOpen(entry.path);
   }
+}
+
+async function createProject(): Promise<void> {
+  const entry = await api.project.create();
+  if (entry) {
+    await refreshSidebarAndOpen(entry.path);
+  }
+}
+
+async function refreshSidebarAndOpen(projectPath: string): Promise<void> {
+  await refreshProjects(sidebarEl, {
+    onSelectProject: openProject,
+    onAddProject: addProject,
+    onCreateProject: createProject,
+    onHomeClick: showHomeScreen,
+  });
+  openProject(projectPath);
 }
 
 async function openProject(projectPath: string): Promise<void> {
@@ -1060,6 +1082,10 @@ function applyFeedFilters(): void {
 function togglePanel(): void {
   panelVisible = !panelVisible;
   panelEl.style.display = panelVisible ? '' : 'none';
+  panelHandle.style.display = panelVisible ? '' : 'none';
+  // Update toggle button state in status bar
+  const btn = document.getElementById('status-panel-toggle');
+  if (btn) btn.classList.toggle('panel-hidden', !panelVisible);
 }
 
 function flipPanelPosition(): void {
@@ -1076,11 +1102,16 @@ function updateStatusBar(): void {
     <span class="status-project">${projectName}</span>
     <span class="status-panes">${paneCount} pane${paneCount !== 1 ? 's' : ''}</span>
     <span class="status-tokens" id="status-tokens"></span>
+    <span id="status-panel-toggle" class="status-panel-toggle${panelVisible ? '' : ' panel-hidden'}" title="Toggle panel (Cmd+B)">panel</span>
   `;
   // Click token stats to toggle burn rate popup
   const tokensEl = document.getElementById('status-tokens');
   if (tokensEl) {
     tokensEl.addEventListener('click', () => toggleBurnRatePopup());
+  }
+  const panelToggle = document.getElementById('status-panel-toggle');
+  if (panelToggle) {
+    panelToggle.addEventListener('click', () => togglePanel());
   }
 }
 
@@ -1303,7 +1334,7 @@ function hideEmptyState(): void {
   emptyState.style.display = 'none';
   workspaceEl.style.display = '';
   panelEl.style.display = panelVisible ? '' : 'none';
-  panelHandle.style.display = '';
+  panelHandle.style.display = panelVisible ? '' : 'none';
 }
 
 function showError(title: string, message: string): void {
@@ -1324,7 +1355,7 @@ function findLeaf(node: SplitNode, id: string): (SplitNode & { type: 'leaf' }) |
 // ─── Resize Handles (sidebar + context panel) ───────────────
 
 function initResizeHandles(): void {
-  setupEdgeResize(sidebarHandle, sidebarEl, 'left', 36, 240);
+  setupEdgeResize(sidebarHandle, sidebarEl, 'left', 36, 280);
   setupEdgeResize(panelHandle, panelEl, 'right', 140, 600);
 }
 

@@ -103,6 +103,12 @@ export class WindowManager {
     });
 
     this.detached.set(projectPath, { window: win, projectPath });
+
+    // Notify main window that project was detached
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('project:detached', projectPath);
+    }
+
     return win;
   }
 

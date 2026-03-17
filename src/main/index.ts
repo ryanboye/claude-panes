@@ -43,8 +43,8 @@ function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
-    minWidth: 800,
-    minHeight: 600,
+    minWidth: 360,
+    minHeight: 300,
     title: 'Claude Panes',
     icon: existsSync(iconFile) ? iconFile : undefined,
     titleBarStyle: 'hiddenInset',

@@ -1,6 +1,6 @@
 /**
- * Project sidebar: icon-only rail with project list, add button,
- * and drag-to-detach for multi-window support.
+ * Project sidebar: responsive rail that collapses to compact icons at narrow
+ * widths and expands to full project cards (name, status, time) when wide.
  */
 
 declare const api: import('../preload/index').ClaudePanesAPI;
@@ -8,6 +8,7 @@ declare const api: import('../preload/index').ClaudePanesAPI;
 export interface ProjectSidebarCallbacks {
   onSelectProject: (projectPath: string) => void;
   onAddProject: () => void;
+  onCreateProject: () => void;
   onHomeClick: () => void;
 }
 
@@ -20,15 +21,31 @@ interface ProjectEntry {
 let currentProjectPath: string | null = null;
 let homeActive = false;
 let projects: ProjectEntry[] = [];
+let sidebarContainer: HTMLElement | null = null;
+let sidebarCallbacks: ProjectSidebarCallbacks | null = null;
+let resizeObserver: ResizeObserver | null = null;
 
-const DRAG_THRESHOLD = 8; // px before we consider it a drag
+const DRAG_THRESHOLD = 8;
+const EXPAND_THRESHOLD = 120; // px — sidebar shows full cards above this
 
 export async function initSidebar(
   container: HTMLElement,
   callbacks: ProjectSidebarCallbacks,
 ): Promise<void> {
+  sidebarContainer = container;
+  sidebarCallbacks = callbacks;
   projects = await api.project.list();
   render(container, callbacks);
+
+  // Watch sidebar width to toggle compact/expanded mode
+  if (resizeObserver) resizeObserver.disconnect();
+  resizeObserver = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const wide = entry.contentRect.width >= EXPAND_THRESHOLD;
+      container.classList.toggle('sidebar-expanded', wide);
+    }
+  });
+  resizeObserver.observe(container);
 }
 
 export function setActiveProject(projectPath: string | null): void {
@@ -43,7 +60,6 @@ export function setHomeActive(active: boolean): void {
     logo.classList.toggle('sidebar-logo-active', active);
   }
   if (active) {
-    // Deselect all projects
     document.querySelectorAll('.sidebar-project').forEach((el) => {
       el.classList.remove('sidebar-project-active');
     });
@@ -75,6 +91,12 @@ function render(container: HTMLElement, callbacks: ProjectSidebarCallbacks): voi
   logo.addEventListener('click', () => callbacks.onHomeClick());
   container.appendChild(logo);
 
+  // Expanded-mode header
+  const header = document.createElement('div');
+  header.className = 'sidebar-header';
+  header.textContent = 'Projects';
+  container.appendChild(header);
+
   const divider = document.createElement('div');
   divider.className = 'sidebar-divider';
   container.appendChild(divider);
@@ -83,7 +105,6 @@ function render(container: HTMLElement, callbacks: ProjectSidebarCallbacks): voi
   const list = document.createElement('div');
   list.className = 'sidebar-projects';
 
-  // Sort by last opened
   const sorted = [...projects].sort((a, b) =>
     new Date(b.lastOpened).getTime() - new Date(a.lastOpened).getTime()
   );
@@ -93,13 +114,29 @@ function render(container: HTMLElement, callbacks: ProjectSidebarCallbacks): voi
     item.className = 'sidebar-project' + (project.path === currentProjectPath ? ' sidebar-project-active' : '');
     item.dataset.path = project.path;
 
-    const initial = project.name.charAt(0).toUpperCase();
-    const badge = document.createElement('div');
-    badge.className = 'sidebar-project-badge';
-    badge.textContent = initial;
-    badge.style.backgroundColor = stringToColor(project.name);
+    // Status dot
+    const dot = document.createElement('span');
+    dot.className = 'sidebar-project-dot';
+    item.appendChild(dot);
 
-    item.appendChild(badge);
+    // Compact abbreviation (shown when narrow)
+    const abbr = document.createElement('span');
+    abbr.className = 'sidebar-project-abbr';
+    abbr.textContent = abbreviate(project.name);
+    item.appendChild(abbr);
+
+    // Full name (shown when expanded)
+    const nameEl = document.createElement('span');
+    nameEl.className = 'sidebar-project-name';
+    nameEl.textContent = project.name;
+    item.appendChild(nameEl);
+
+    // Relative time (shown when expanded)
+    const timeEl = document.createElement('span');
+    timeEl.className = 'sidebar-project-time';
+    timeEl.textContent = relativeTime(project.lastOpened);
+    item.appendChild(timeEl);
+
     item.title = project.name;
 
     // Click — open project or focus its detached window
@@ -112,8 +149,8 @@ function render(container: HTMLElement, callbacks: ProjectSidebarCallbacks): voi
       }
     });
 
-    // Drag-to-detach
-    setupDragToDetach(badge, project, container, callbacks);
+    // Drag-to-detach (uses the whole item in compact mode)
+    setupDragToDetach(item, project, container, callbacks);
 
     // Right-click to remove
     item.addEventListener('contextmenu', (e) => {
@@ -130,26 +167,39 @@ function render(container: HTMLElement, callbacks: ProjectSidebarCallbacks): voi
 
   container.appendChild(list);
 
-  // Add project button
+  // Bottom buttons
+  const bottomBtns = document.createElement('div');
+  bottomBtns.className = 'sidebar-bottom-btns';
+
+  // New project (creates a folder)
+  const newBtn = document.createElement('div');
+  newBtn.className = 'sidebar-add';
+  newBtn.innerHTML = '<span class="sidebar-add-icon">+</span><span class="sidebar-add-label">New Project</span>';
+  newBtn.title = 'New Project';
+  newBtn.addEventListener('click', () => callbacks.onCreateProject());
+  bottomBtns.appendChild(newBtn);
+
+  // Add existing project (open folder)
   const addBtn = document.createElement('div');
   addBtn.className = 'sidebar-add';
-  addBtn.innerHTML = '+';
-  addBtn.title = 'Add Project (Cmd+N)';
+  addBtn.innerHTML = '<span class="sidebar-add-icon">&#x21B3;</span><span class="sidebar-add-label">Open Existing</span>';
+  addBtn.title = 'Open Existing Folder (Cmd+N)';
   addBtn.addEventListener('click', () => callbacks.onAddProject());
-  container.appendChild(addBtn);
+  bottomBtns.appendChild(addBtn);
 
-  // Update detached state after render
+  container.appendChild(bottomBtns);
+
   updateDetachedState();
 }
 
 function setupDragToDetach(
-  badge: HTMLElement,
+  item: HTMLElement,
   project: ProjectEntry,
   container: HTMLElement,
   callbacks: ProjectSidebarCallbacks,
 ): void {
-  badge.addEventListener('mousedown', (e) => {
-    if (e.button !== 0) return; // left click only
+  item.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
     e.preventDefault();
 
     const startX = e.screenX;
@@ -163,12 +213,12 @@ function setupDragToDetach(
 
       if (!dragging && Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
         dragging = true;
-        badge.classList.add('sidebar-badge-dragging');
+        item.classList.add('sidebar-badge-dragging');
         document.body.style.cursor = 'grabbing';
 
-        // Create floating ghost
-        ghost = badge.cloneNode(true) as HTMLElement;
+        ghost = document.createElement('div');
         ghost.className = 'sidebar-drag-ghost';
+        ghost.textContent = abbreviate(project.name);
         ghost.style.position = 'fixed';
         ghost.style.pointerEvents = 'none';
         ghost.style.zIndex = '9999';
@@ -184,16 +234,15 @@ function setupDragToDetach(
     const onMouseUp = async (ev: MouseEvent) => {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
-      badge.classList.remove('sidebar-badge-dragging');
+      item.classList.remove('sidebar-badge-dragging');
       document.body.style.cursor = '';
       if (ghost) {
         ghost.remove();
         ghost = null;
       }
 
-      if (!dragging) return; // was a click, not a drag — let click handler fire
+      if (!dragging) return;
 
-      // Check if cursor is outside window bounds
       const [cursor, bounds] = await Promise.all([
         api.window.getCursorScreenPoint(),
         api.window.getWindowBounds(),
@@ -221,7 +270,6 @@ function setupDragToDetach(
 
 /**
  * Toggle the idle/active appearance of a project icon.
- * When `active` is false (no agents burning tokens), the icon fades out.
  */
 export function updateProjectActivity(projectPath: string, active: boolean): void {
   const items = document.querySelectorAll('.sidebar-project');
@@ -241,11 +289,22 @@ function updateActiveState(): void {
   });
 }
 
-function stringToColor(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+function abbreviate(name: string): string {
+  const words = name.split(/[\s\-_]+/).filter(Boolean);
+  if (words.length >= 2) {
+    return (words[0][0] + words[1][0]).toUpperCase();
   }
-  const hue = hash % 360;
-  return `hsl(${hue < 0 ? hue + 360 : hue}, 50%, 40%)`;
+  return name.slice(0, 2).toUpperCase();
+}
+
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return 'now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
 }

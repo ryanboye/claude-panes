@@ -50,6 +50,7 @@ const api = {
   project: {
     list: () => ipcRenderer.invoke('project:list') as Promise<ProjectEntry[]>,
     add: () => ipcRenderer.invoke('project:add') as Promise<ProjectEntry | null>,
+    create: () => ipcRenderer.invoke('project:create') as Promise<ProjectEntry | null>,
     remove: (path: string) => ipcRenderer.invoke('project:remove', path),
     open: (path: string) => ipcRenderer.invoke('project:open', path),
     saveConfig: (path: string, config: unknown) => ipcRenderer.invoke('project:saveConfig', path, config),

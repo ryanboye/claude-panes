@@ -15,7 +15,7 @@ import type { ActivityEvent } from './activity-detector';
 import { getRole, AGENT_ROLES, getRoleNames } from './agent-config';
 import { buildSystemPrompt } from './context-builder';
 import * as store from './project-store';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { spawn, ChildProcess } from 'child_process';
 
@@ -283,6 +283,27 @@ export function registerIpcHandlers(
     });
     if (result.canceled || !result.filePaths[0]) return null;
     const entry = store.addProject(result.filePaths[0]);
+    store.initProjectState(entry.path);
+    return entry;
+  });
+
+  ipcMain.handle('project:create', async () => {
+    const home = process.env.HOME || '~';
+    const baseDir = join(home, 'claude-projects');
+    mkdirSync(baseDir, { recursive: true });
+
+    // Generate name like "project-0316-1423"
+    const now = new Date();
+    const ts = String(now.getMonth() + 1).padStart(2, '0')
+      + String(now.getDate()).padStart(2, '0')
+      + '-'
+      + String(now.getHours()).padStart(2, '0')
+      + String(now.getMinutes()).padStart(2, '0');
+    const name = `project-${ts}`;
+
+    const projectPath = join(baseDir, name);
+    mkdirSync(projectPath, { recursive: true });
+    const entry = store.addProject(projectPath);
     store.initProjectState(entry.path);
     return entry;
   });

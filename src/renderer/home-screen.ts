@@ -1,6 +1,6 @@
 /**
- * Home screen dashboard: canvas-style view with draggable mini terminal cards
- * on a dot-grid background. Shows live output snippets with inline input.
+ * Home screen dashboard: responsive grid of mini terminal cards on a dot-grid
+ * background. Shows live output snippets with inline input. Reflows on resize.
  */
 
 declare const api: import('../preload/index').ClaudePanesAPI;
@@ -34,8 +34,6 @@ let container: HTMLElement | null = null;
 let canvasEl: HTMLElement | null = null;
 let navigateCb: NavigateCallback | null = null;
 let currentPanes: DashboardPane[] = [];
-let draggingPaneId: string | null = null;
-
 const ROLE_COLORS: Record<string, string> = {
   researcher: 'var(--role-researcher)',
   architect: 'var(--role-architect)',
@@ -44,45 +42,6 @@ const ROLE_COLORS: Record<string, string> = {
   designer: 'var(--role-designer)',
   default: 'var(--text-muted)',
 };
-
-// Card positions persisted to localStorage
-const POSITIONS_KEY = 'claude-panes-canvas-positions';
-const cardPositions = new Map<string, { x: number; y: number }>();
-
-// Auto-layout constants
-const CARD_W = 300;
-const CARD_H = 360;
-const GAP = 20;
-const COLS = 3;
-
-function loadPositions(): void {
-  try {
-    const raw = localStorage.getItem(POSITIONS_KEY);
-    if (raw) {
-      const obj = JSON.parse(raw) as Record<string, { x: number; y: number }>;
-      for (const [k, v] of Object.entries(obj)) {
-        cardPositions.set(k, v);
-      }
-    }
-  } catch { /* ignore */ }
-}
-
-function savePositions(): void {
-  const obj: Record<string, { x: number; y: number }> = {};
-  for (const [k, v] of cardPositions) {
-    obj[k] = v;
-  }
-  localStorage.setItem(POSITIONS_KEY, JSON.stringify(obj));
-}
-
-function autoLayoutPosition(index: number): { x: number; y: number } {
-  const col = index % COLS;
-  const row = Math.floor(index / COLS);
-  return {
-    x: GAP + col * (CARD_W + GAP),
-    y: GAP + row * (CARD_H + GAP),
-  };
-}
 
 export function renderHomeScreen(
   el: HTMLElement,
@@ -93,7 +52,6 @@ export function renderHomeScreen(
   el.innerHTML = '';
   el.className = 'home-screen';
   canvasEl = null;
-  loadPositions();
   refreshDashboard();
 }
 
@@ -145,18 +103,12 @@ export function updateHomeScreen(panes: DashboardPane[]): void {
   }
 
   // Add or update cards
-  let newIndex = panes.length; // for auto-layout of brand new cards
   for (let i = 0; i < panes.length; i++) {
     const pane = panes[i];
     const existing = existingCards.get(pane.paneId);
     if (existing) {
       updateCard(pane, existing);
     } else {
-      // Assign position for new card if not already stored
-      if (!cardPositions.has(pane.paneId)) {
-        cardPositions.set(pane.paneId, autoLayoutPosition(i));
-        savePositions();
-      }
       canvasEl.appendChild(createCard(pane));
     }
   }
@@ -188,8 +140,6 @@ function createCard(pane: DashboardPane): HTMLElement {
   card.dataset.paneId = pane.paneId;
   card.dataset.projectId = pane.projectId;
 
-  applyPosition(card, pane.paneId);
-
   // ── Titlebar ──
   const titlebar = document.createElement('div');
   titlebar.className = 'canvas-card-titlebar';
@@ -219,21 +169,26 @@ function createCard(pane: DashboardPane): HTMLElement {
   statusEl.textContent = getStatusText(pane);
   titlebar.appendChild(statusEl);
 
-  // Drag via pointer events on titlebar
-  setupDrag(titlebar, card, pane.paneId);
+  // Click titlebar to navigate to pane
+  titlebar.addEventListener('click', () => {
+    const projectId = card.dataset.projectId;
+    if (projectId && navigateCb) {
+      navigateCb(projectId, pane.paneId);
+    }
+  });
 
   card.appendChild(titlebar);
 
-  // ── Preview ──
+  // ── Preview (short, 3 lines max) ──
   const preview = document.createElement('pre');
   preview.className = 'canvas-card-preview';
   preview.textContent = formatSnippet(pane);
   card.appendChild(preview);
 
-  // ── Stats ──
+  // ── Stats (rich, with histogram + colored values) ──
   const stats = document.createElement('div');
   stats.className = 'canvas-card-stats';
-  stats.textContent = formatCompactStats(pane);
+  stats.innerHTML = buildStatsHTML(pane);
   card.appendChild(stats);
 
   // ── Input ──
@@ -264,74 +219,15 @@ function createCard(pane: DashboardPane): HTMLElement {
   return card;
 }
 
-function applyPosition(card: HTMLElement, paneId: string): void {
-  const pos = cardPositions.get(paneId) ?? { x: 20, y: 20 };
-  card.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
-}
-
-function setupDrag(titlebar: HTMLElement, card: HTMLElement, paneId: string): void {
-  let startX = 0;
-  let startY = 0;
-  let origX = 0;
-  let origY = 0;
-  let dragging = false;
-  const CLICK_THRESHOLD = 3;
-
-  titlebar.addEventListener('pointerdown', (e: PointerEvent) => {
-    if ((e.target as HTMLElement).tagName === 'INPUT') return;
-    e.preventDefault();
-    titlebar.setPointerCapture(e.pointerId);
-    startX = e.clientX;
-    startY = e.clientY;
-    const pos = cardPositions.get(paneId) ?? { x: 0, y: 0 };
-    origX = pos.x;
-    origY = pos.y;
-    dragging = false;
-    draggingPaneId = paneId;
-  });
-
-  titlebar.addEventListener('pointermove', (e: PointerEvent) => {
-    if (!titlebar.hasPointerCapture(e.pointerId)) return;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
-    if (!dragging && Math.abs(dx) + Math.abs(dy) < CLICK_THRESHOLD) return;
-    dragging = true;
-    const newX = Math.max(0, origX + dx);
-    const newY = Math.max(0, origY + dy);
-    card.style.transform = `translate(${newX}px, ${newY}px)`;
-    cardPositions.set(paneId, { x: newX, y: newY });
-  });
-
-  titlebar.addEventListener('pointerup', (e: PointerEvent) => {
-    if (titlebar.hasPointerCapture(e.pointerId)) {
-      titlebar.releasePointerCapture(e.pointerId);
-    }
-    draggingPaneId = null;
-    if (dragging) {
-      savePositions();
-    } else {
-      // Click — navigate to pane
-      const projectId = card.dataset.projectId;
-      if (projectId && navigateCb) {
-        navigateCb(projectId, paneId);
-      }
-    }
-  });
-}
 
 function updateCard(pane: DashboardPane, card: HTMLElement): void {
   // Update status classes without touching transform
   const status = getStatusClass(pane);
   const showInput = needsInput(pane);
 
-  // Rebuild class list preserving nothing else
+  // Rebuild class list
   card.className = `canvas-card ${status}`;
   if (showInput) card.classList.add('needs-input');
-
-  // Re-apply position unless this card is actively being dragged
-  if (pane.paneId !== draggingPaneId) {
-    applyPosition(card, pane.paneId);
-  }
 
   // Update status text
   const statusEl = card.querySelector('.canvas-card-status');
@@ -343,7 +239,7 @@ function updateCard(pane: DashboardPane, card: HTMLElement): void {
 
   // Update stats
   const stats = card.querySelector('.canvas-card-stats');
-  if (stats) stats.textContent = formatCompactStats(pane);
+  if (stats) stats.innerHTML = buildStatsHTML(pane);
 
   // Update input placeholder
   const input = card.querySelector('.canvas-card-input') as HTMLInputElement | null;
@@ -354,16 +250,40 @@ function updateCard(pane: DashboardPane, card: HTMLElement): void {
 
 function formatSnippet(pane: DashboardPane): string {
   if (pane.lastSnippet.length > 0) {
-    return pane.lastSnippet.join('\n');
+    // Limit to 3 lines for compact cards
+    return pane.lastSnippet.slice(-3).join('\n');
   }
   return pane.lastActivity || 'Starting...';
 }
 
-function formatCompactStats(pane: DashboardPane): string {
+function buildStatsHTML(pane: DashboardPane): string {
   const tok = formatTokens(pane.totalTokens);
+  const cost = pane.costUsd > 0 ? `$${pane.costUsd.toFixed(2)}` : '';
   const rate = pane.currentTokPerSec > 0 ? `${pane.currentTokPerSec} tok/s` : '';
   const uptime = formatUptime(pane.spawnedAt);
-  return [tok, rate, uptime].filter(Boolean).join(' | ');
+  const rateClass = pane.isActiveBurn ? 'stat-active' : '';
+
+  // Build mini histogram from the pane's histogram data
+  let histogramHTML = '';
+  if (pane.histogram && pane.histogram.length > 0) {
+    const max = Math.max(...pane.histogram, 1);
+    const bars = pane.histogram.slice(-20).map(v => {
+      const h = Math.max(1, Math.round((v / max) * 20));
+      const cls = v === 0 ? 'bar-idle' : '';
+      return `<span class="canvas-card-histogram-bar ${cls}" style="height:${h}px"></span>`;
+    }).join('');
+    histogramHTML = `<div class="canvas-card-histogram">${bars}</div>`;
+  }
+
+  // Row 1: tokens, cost, rate
+  const statsRow = [
+    tok ? `<span class="canvas-card-stat"><span class="canvas-card-stat-value stat-tokens">${tok}</span></span>` : '',
+    cost ? `<span class="canvas-card-stat"><span class="canvas-card-stat-value stat-cost">${cost}</span></span>` : '',
+    rate ? `<span class="canvas-card-stat"><span class="canvas-card-stat-value ${rateClass}">${rate}</span></span>` : '',
+    `<span class="canvas-card-stat"><span class="canvas-card-stat-value">${uptime}</span></span>`,
+  ].filter(Boolean).join('');
+
+  return `<div class="canvas-card-stats-row">${statsRow}</div>${histogramHTML}`;
 }
 
 function formatUptime(spawnedAt: number): string {
