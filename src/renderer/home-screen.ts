@@ -1,6 +1,6 @@
 /**
- * Home screen dashboard: shows all active agents across all projects.
- * Stuck agents surface their question and allow inline response.
+ * Home screen dashboard: canvas-style view with draggable mini terminal cards
+ * on a dot-grid background. Shows live output snippets with inline input.
  */
 
 declare const api: import('../preload/index').ClaudePanesAPI;
@@ -10,12 +10,13 @@ export interface DashboardPane {
   projectId: string;
   projectName: string;
   role: string;
-  costUsd: number; // kept for interface compat, not displayed
+  costUsd: number;
   totalTokens: number;
   isAlive: boolean;
   isStuck: boolean;
   stuckQuestion: string | null;
   lastActivity: string;
+  lastSnippet: string[];
   spawnedAt: number;
   currentTokPerSec: number;
   avgTokPerSec: number;
@@ -30,8 +31,10 @@ export interface DashboardPane {
 type NavigateCallback = (projectId: string, paneId: string) => void;
 
 let container: HTMLElement | null = null;
+let canvasEl: HTMLElement | null = null;
 let navigateCb: NavigateCallback | null = null;
 let currentPanes: DashboardPane[] = [];
+let draggingPaneId: string | null = null;
 
 const ROLE_COLORS: Record<string, string> = {
   researcher: 'var(--role-researcher)',
@@ -42,18 +45,44 @@ const ROLE_COLORS: Record<string, string> = {
   default: 'var(--text-muted)',
 };
 
-const HIST_COLORS = {
-  barNormal: '#4ade80',
-  barHigh: '#fbbf24',
-  barPeak: '#ff6b6b',
-};
+// Card positions persisted to localStorage
+const POSITIONS_KEY = 'claude-panes-canvas-positions';
+const cardPositions = new Map<string, { x: number; y: number }>();
 
-const ACTIVITY_COLORS: Record<string, string> = {
-  reading: '#60a5fa',
-  editing: '#fbbf24',
-  thinking: '#c084fc',
-  idle: '#2a2a4a',
-};
+// Auto-layout constants
+const CARD_W = 300;
+const CARD_H = 360;
+const GAP = 20;
+const COLS = 3;
+
+function loadPositions(): void {
+  try {
+    const raw = localStorage.getItem(POSITIONS_KEY);
+    if (raw) {
+      const obj = JSON.parse(raw) as Record<string, { x: number; y: number }>;
+      for (const [k, v] of Object.entries(obj)) {
+        cardPositions.set(k, v);
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+function savePositions(): void {
+  const obj: Record<string, { x: number; y: number }> = {};
+  for (const [k, v] of cardPositions) {
+    obj[k] = v;
+  }
+  localStorage.setItem(POSITIONS_KEY, JSON.stringify(obj));
+}
+
+function autoLayoutPosition(index: number): { x: number; y: number } {
+  const col = index % COLS;
+  const row = Math.floor(index / COLS);
+  return {
+    x: GAP + col * (CARD_W + GAP),
+    y: GAP + row * (CARD_H + GAP),
+  };
+}
 
 export function renderHomeScreen(
   el: HTMLElement,
@@ -63,8 +92,8 @@ export function renderHomeScreen(
   navigateCb = onNavigate;
   el.innerHTML = '';
   el.className = 'home-screen';
-
-  // Initial load
+  canvasEl = null;
+  loadPositions();
   refreshDashboard();
 }
 
@@ -79,6 +108,7 @@ export function updateHomeScreen(panes: DashboardPane[]): void {
   currentPanes = panes;
 
   if (panes.length === 0) {
+    canvasEl = null;
     container.innerHTML = `
       <div class="home-empty">
         <h2>No Active Agents</h2>
@@ -88,335 +118,252 @@ export function updateHomeScreen(panes: DashboardPane[]): void {
     return;
   }
 
-  // Group by project
-  const byProject = new Map<string, DashboardPane[]>();
-  for (const pane of panes) {
-    const group = byProject.get(pane.projectId) ?? [];
-    group.push(pane);
-    byProject.set(pane.projectId, group);
+  // Ensure canvas exists
+  if (!canvasEl || !container.contains(canvasEl)) {
+    container.innerHTML = '';
+    canvasEl = document.createElement('div');
+    canvasEl.className = 'home-canvas';
+    container.appendChild(canvasEl);
   }
 
-  // Diff update: only rebuild if pane count changed or IDs changed
-  const existingIds = new Set(
-    Array.from(container.querySelectorAll('.home-card')).map(
-      (el) => (el as HTMLElement).dataset.paneId,
-    ),
-  );
-  const newIds = new Set(panes.map((p) => p.paneId));
-  const needsRebuild =
-    existingIds.size !== newIds.size ||
-    [...newIds].some((id) => !existingIds.has(id));
+  // Reconcile cards: add new, remove stale, update existing
+  const existingCards = new Map<string, HTMLElement>();
+  for (const el of Array.from(canvasEl.querySelectorAll('.canvas-card'))) {
+    const htmlEl = el as HTMLElement;
+    const id = htmlEl.dataset.paneId;
+    if (id) existingCards.set(id, htmlEl);
+  }
 
-  if (needsRebuild) {
-    rebuildGrid(byProject);
-  } else {
-    // Update existing cards in-place
-    for (const pane of panes) {
-      updateCard(pane);
+  const currentIds = new Set(panes.map(p => p.paneId));
+
+  // Remove cards for panes that no longer exist
+  for (const [id, el] of existingCards) {
+    if (!currentIds.has(id)) {
+      el.remove();
+      existingCards.delete(id);
+    }
+  }
+
+  // Add or update cards
+  let newIndex = panes.length; // for auto-layout of brand new cards
+  for (let i = 0; i < panes.length; i++) {
+    const pane = panes[i];
+    const existing = existingCards.get(pane.paneId);
+    if (existing) {
+      updateCard(pane, existing);
+    } else {
+      // Assign position for new card if not already stored
+      if (!cardPositions.has(pane.paneId)) {
+        cardPositions.set(pane.paneId, autoLayoutPosition(i));
+        savePositions();
+      }
+      canvasEl.appendChild(createCard(pane));
     }
   }
 }
 
-function rebuildGrid(byProject: Map<string, DashboardPane[]>): void {
-  if (!container) return;
-  container.innerHTML = '';
+function getStatusClass(pane: DashboardPane): string {
+  if (pane.isStuck) return 'status-stuck';
+  if (!pane.isAlive) return 'status-exited';
+  if (pane.activity !== 'idle' || pane.currentTokPerSec > 0) return 'status-working';
+  return 'status-idle';
+}
 
-  const section = document.createElement('div');
-  section.className = 'home-project-section';
+function getStatusText(pane: DashboardPane): string {
+  if (pane.isStuck) return 'stuck';
+  if (!pane.isAlive) return 'exited';
+  if (pane.activity !== 'idle' || pane.currentTokPerSec > 0) return pane.activity || 'working';
+  return 'idle';
+}
 
-  const grid = document.createElement('div');
-  grid.className = 'home-grid';
-
-  for (const [projectId, panes] of byProject) {
-    for (const pane of panes) {
-      grid.appendChild(createCard(pane));
-    }
-  }
-
-  section.appendChild(grid);
-  container.appendChild(section);
+function needsInput(pane: DashboardPane): boolean {
+  return pane.isStuck || (!pane.isActiveBurn && pane.isAlive);
 }
 
 function createCard(pane: DashboardPane): HTMLElement {
   const card = document.createElement('div');
-  card.className = 'home-card' + (pane.isStuck ? ' stuck' : '') + (!pane.isAlive ? ' exited' : '');
+  const status = getStatusClass(pane);
+  card.className = `canvas-card ${status}`;
+  if (needsInput(pane)) card.classList.add('needs-input');
   card.dataset.paneId = pane.paneId;
-  card.style.borderLeftColor = ROLE_COLORS[pane.role] ?? ROLE_COLORS.default;
+  card.dataset.projectId = pane.projectId;
 
-  // Header (clickable to navigate)
-  const headerEl = document.createElement('div');
-  headerEl.className = 'home-card-header';
-  headerEl.addEventListener('click', () => {
-    navigateCb?.(pane.projectId, pane.paneId);
-  });
+  applyPosition(card, pane.paneId);
 
+  // ── Titlebar ──
+  const titlebar = document.createElement('div');
+  titlebar.className = 'canvas-card-titlebar';
+
+  // Decorative macOS dots
+  const dots = document.createElement('div');
+  dots.className = 'canvas-card-dots';
+  dots.innerHTML = '<span></span><span></span><span></span>';
+  titlebar.appendChild(dots);
+
+  // Role badge
   const roleEl = document.createElement('span');
-  roleEl.className = 'home-card-role';
+  roleEl.className = 'canvas-card-role';
   roleEl.textContent = pane.role === 'default' ? 'agent' : pane.role;
   roleEl.style.color = ROLE_COLORS[pane.role] ?? ROLE_COLORS.default;
-  headerEl.appendChild(roleEl);
+  titlebar.appendChild(roleEl);
 
+  // Project name
   const projectLabel = document.createElement('span');
-  projectLabel.className = 'home-card-project';
+  projectLabel.className = 'canvas-card-project';
   projectLabel.textContent = pane.projectName;
-  headerEl.appendChild(projectLabel);
+  titlebar.appendChild(projectLabel);
 
+  // Status text
   const statusEl = document.createElement('span');
-  statusEl.className = 'home-card-status';
-  if (pane.isStuck) {
-    statusEl.classList.add('status-stuck');
-    statusEl.textContent = 'stuck';
-  } else if (!pane.isAlive) {
-    statusEl.classList.add('status-exited');
-    statusEl.textContent = 'exited';
-  } else if (!pane.isActiveBurn) {
-    statusEl.classList.add('status-idle');
-    statusEl.textContent = 'idle';
-  } else {
-    statusEl.classList.add('status-running');
-    statusEl.textContent = 'running';
-  }
-  headerEl.appendChild(statusEl);
+  statusEl.className = 'canvas-card-status';
+  statusEl.textContent = getStatusText(pane);
+  titlebar.appendChild(statusEl);
 
-  card.appendChild(headerEl);
+  // Drag via pointer events on titlebar
+  setupDrag(titlebar, card, pane.paneId);
 
-  // Activity line
-  const activityEl = document.createElement('div');
-  activityEl.className = 'home-card-activity';
-  activityEl.textContent = pane.lastActivity
-    ? truncate(pane.lastActivity, 120)
-    : 'Starting...';
-  card.appendChild(activityEl);
+  card.appendChild(titlebar);
 
-  // Stats row (current rate, avg, peak)
-  const statsEl = document.createElement('div');
-  statsEl.className = 'home-card-stats';
-  statsEl.innerHTML = `
-    <span class="home-card-stat-current">${pane.currentTokPerSec} tok/s</span>
-    <span class="home-card-stat-sep">&middot;</span>
-    <span>avg ${pane.avgTokPerSec}</span>
-    <span class="home-card-stat-sep">&middot;</span>
-    <span>peak ${pane.peakTokPerSec}</span>
-  `;
-  card.appendChild(statsEl);
+  // ── Preview ──
+  const preview = document.createElement('pre');
+  preview.className = 'canvas-card-preview';
+  preview.textContent = formatSnippet(pane);
+  card.appendChild(preview);
 
-  // Histogram canvas
-  const canvasWrap = document.createElement('div');
-  canvasWrap.className = 'home-card-chart-wrap';
-  const canvas = document.createElement('canvas');
-  canvas.className = 'home-card-chart';
-  canvas.height = 24 * window.devicePixelRatio;
-  canvas.style.height = '24px';
-  canvasWrap.appendChild(canvas);
-  card.appendChild(canvasWrap);
+  // ── Stats ──
+  const stats = document.createElement('div');
+  stats.className = 'canvas-card-stats';
+  stats.textContent = formatCompactStats(pane);
+  card.appendChild(stats);
 
-  // Activity timeline bar
-  const timelineEl = document.createElement('div');
-  timelineEl.className = 'home-card-timeline';
-  card.appendChild(timelineEl);
-
-  // Draw chart after append (needs width)
-  requestAnimationFrame(() => {
-    const w = canvasWrap.clientWidth;
-    if (w > 0) {
-      canvas.width = w * window.devicePixelRatio;
-      canvas.style.width = `${w}px`;
-      drawCardHistogram(canvas, pane.histogram, pane.peakTokPerSec);
-    }
-    drawCardTimeline(timelineEl, pane.activityTimeline);
-  });
-
-  // Meta row (tokens + uptime + activity label)
-  const metaEl = document.createElement('div');
-  metaEl.className = 'home-card-meta';
-
-  const tokensEl = document.createElement('span');
-  tokensEl.className = 'home-card-tokens';
-  tokensEl.textContent = formatTokens(pane.totalTokens ?? 0);
-  metaEl.appendChild(tokensEl);
-
-  const actLabel = document.createElement('span');
-  actLabel.className = 'home-card-activity-label';
-  actLabel.textContent = pane.activity !== 'idle' ? pane.activity : '';
-  metaEl.appendChild(actLabel);
-
-  const uptimeEl = document.createElement('span');
-  uptimeEl.className = 'home-card-uptime';
-  uptimeEl.textContent = formatUptime(pane.spawnedAt);
-  metaEl.appendChild(uptimeEl);
-  card.appendChild(metaEl);
-
-  // Stuck question + input
-  if (pane.isStuck && pane.stuckQuestion) {
-    const questionEl = document.createElement('div');
-    questionEl.className = 'home-card-question';
-    questionEl.textContent = pane.stuckQuestion;
-    card.appendChild(questionEl);
-
-    const inputEl = document.createElement('input');
-    inputEl.className = 'home-card-input';
-    inputEl.type = 'text';
-    inputEl.placeholder = 'Type a response and press Enter...';
-    inputEl.addEventListener('click', (e) => e.stopPropagation());
-    inputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && inputEl.value.trim()) {
-        e.preventDefault();
-        const text = inputEl.value.trim();
-        api.pty.write(pane.paneId, pane.projectId, text + '\n');
+  // ── Input ──
+  const inputEl = document.createElement('input');
+  inputEl.className = 'canvas-card-input';
+  inputEl.type = 'text';
+  inputEl.placeholder = pane.isStuck
+    ? 'Respond to agent...'
+    : 'Send input...';
+  inputEl.addEventListener('click', (e) => e.stopPropagation());
+  inputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && inputEl.value.trim()) {
+      e.preventDefault();
+      const text = inputEl.value.trim();
+      api.pty.write(pane.paneId, pane.projectId, text + '\n');
+      if (pane.isStuck) {
         api.dashboard.clearStuck(pane.paneId);
-        inputEl.value = '';
-        card.classList.remove('stuck');
-        const qEl = card.querySelector('.home-card-question');
-        if (qEl) qEl.remove();
-        inputEl.remove();
-        const st = card.querySelector('.home-card-status');
-        if (st) {
-          st.className = 'home-card-status status-running';
-          st.textContent = 'running';
-        }
       }
-    });
-    card.appendChild(inputEl);
-  }
-
-  // Click non-stuck card to navigate
-  if (!pane.isStuck) {
-    card.style.cursor = 'pointer';
-    card.addEventListener('click', () => {
-      navigateCb?.(pane.projectId, pane.paneId);
-    });
-  }
+      inputEl.value = '';
+      card.classList.remove('status-stuck', 'needs-input');
+      card.classList.add('status-working');
+      const st = card.querySelector('.canvas-card-status');
+      if (st) st.textContent = 'working';
+    }
+  });
+  card.appendChild(inputEl);
 
   return card;
 }
 
-function drawCardHistogram(canvas: HTMLCanvasElement, histogram: number[], peak: number): void {
-  const ctx = canvas.getContext('2d');
-  if (!ctx || histogram.length === 0) return;
-
-  const w = canvas.width;
-  const h = canvas.height;
-  const peakVal = peak || 1;
-  const barCount = histogram.length;
-  const barWidth = w / barCount;
-  const gap = Math.max(0.5, barWidth * 0.1);
-
-  ctx.clearRect(0, 0, w, h);
-
-  for (let i = 0; i < barCount; i++) {
-    const rate = histogram[i];
-    if (rate <= 0) continue;
-
-    const ratio = rate / peakVal;
-    const barH = Math.max(1, ratio * (h - 2));
-
-    let color: string;
-    if (ratio > 0.85) color = HIST_COLORS.barPeak;
-    else if (ratio > 0.5) color = HIST_COLORS.barHigh;
-    else color = HIST_COLORS.barNormal;
-
-    ctx.fillStyle = color;
-    ctx.globalAlpha = 0.85;
-    ctx.fillRect(i * barWidth + gap / 2, h - barH, barWidth - gap, barH);
-  }
-  ctx.globalAlpha = 1;
+function applyPosition(card: HTMLElement, paneId: string): void {
+  const pos = cardPositions.get(paneId) ?? { x: 20, y: 20 };
+  card.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
 }
 
-function drawCardTimeline(el: HTMLElement, timeline: string[]): void {
-  el.innerHTML = '';
-  if (timeline.length === 0) return;
+function setupDrag(titlebar: HTMLElement, card: HTMLElement, paneId: string): void {
+  let startX = 0;
+  let startY = 0;
+  let origX = 0;
+  let origY = 0;
+  let dragging = false;
+  const CLICK_THRESHOLD = 3;
 
-  const segments: Array<{ activity: string; count: number }> = [];
-  for (const act of timeline) {
-    const last = segments[segments.length - 1];
-    if (last && last.activity === act) {
-      last.count++;
-    } else {
-      segments.push({ activity: act, count: 1 });
+  titlebar.addEventListener('pointerdown', (e: PointerEvent) => {
+    if ((e.target as HTMLElement).tagName === 'INPUT') return;
+    e.preventDefault();
+    titlebar.setPointerCapture(e.pointerId);
+    startX = e.clientX;
+    startY = e.clientY;
+    const pos = cardPositions.get(paneId) ?? { x: 0, y: 0 };
+    origX = pos.x;
+    origY = pos.y;
+    dragging = false;
+    draggingPaneId = paneId;
+  });
+
+  titlebar.addEventListener('pointermove', (e: PointerEvent) => {
+    if (!titlebar.hasPointerCapture(e.pointerId)) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (!dragging && Math.abs(dx) + Math.abs(dy) < CLICK_THRESHOLD) return;
+    dragging = true;
+    const newX = Math.max(0, origX + dx);
+    const newY = Math.max(0, origY + dy);
+    card.style.transform = `translate(${newX}px, ${newY}px)`;
+    cardPositions.set(paneId, { x: newX, y: newY });
+  });
+
+  titlebar.addEventListener('pointerup', (e: PointerEvent) => {
+    if (titlebar.hasPointerCapture(e.pointerId)) {
+      titlebar.releasePointerCapture(e.pointerId);
     }
+    draggingPaneId = null;
+    if (dragging) {
+      savePositions();
+    } else {
+      // Click — navigate to pane
+      const projectId = card.dataset.projectId;
+      if (projectId && navigateCb) {
+        navigateCb(projectId, paneId);
+      }
+    }
+  });
+}
+
+function updateCard(pane: DashboardPane, card: HTMLElement): void {
+  // Update status classes without touching transform
+  const status = getStatusClass(pane);
+  const showInput = needsInput(pane);
+
+  // Rebuild class list preserving nothing else
+  card.className = `canvas-card ${status}`;
+  if (showInput) card.classList.add('needs-input');
+
+  // Re-apply position unless this card is actively being dragged
+  if (pane.paneId !== draggingPaneId) {
+    applyPosition(card, pane.paneId);
   }
 
-  const total = timeline.length;
-  for (const seg of segments) {
-    const div = document.createElement('div');
-    div.className = 'home-card-timeline-seg';
-    div.style.flex = String(seg.count / total);
-    div.style.backgroundColor = ACTIVITY_COLORS[seg.activity] ?? ACTIVITY_COLORS.idle;
-    el.appendChild(div);
+  // Update status text
+  const statusEl = card.querySelector('.canvas-card-status');
+  if (statusEl) statusEl.textContent = getStatusText(pane);
+
+  // Update preview
+  const preview = card.querySelector('.canvas-card-preview');
+  if (preview) preview.textContent = formatSnippet(pane);
+
+  // Update stats
+  const stats = card.querySelector('.canvas-card-stats');
+  if (stats) stats.textContent = formatCompactStats(pane);
+
+  // Update input placeholder
+  const input = card.querySelector('.canvas-card-input') as HTMLInputElement | null;
+  if (input) {
+    input.placeholder = pane.isStuck ? 'Respond to agent...' : 'Send input...';
   }
 }
 
-function updateCard(pane: DashboardPane): void {
-  const card = document.querySelector(`.home-card[data-pane-id="${pane.paneId}"]`) as HTMLElement | null;
-  if (!card) return;
-
-  // Update stuck/exited state
-  card.classList.toggle('stuck', pane.isStuck);
-  card.classList.toggle('exited', !pane.isAlive);
-
-  // Update status
-  const statusEl = card.querySelector('.home-card-status');
-  if (statusEl) {
-    statusEl.className = 'home-card-status';
-    if (pane.isStuck) {
-      statusEl.classList.add('status-stuck');
-      statusEl.textContent = 'stuck';
-    } else if (!pane.isAlive) {
-      statusEl.classList.add('status-exited');
-      statusEl.textContent = 'exited';
-    } else {
-      statusEl.classList.add('status-running');
-      statusEl.textContent = 'running';
-    }
+function formatSnippet(pane: DashboardPane): string {
+  if (pane.lastSnippet.length > 0) {
+    return pane.lastSnippet.join('\n');
   }
+  return pane.lastActivity || 'Starting...';
+}
 
-  // Update activity
-  const activityEl = card.querySelector('.home-card-activity');
-  if (activityEl && pane.lastActivity) {
-    activityEl.textContent = truncate(pane.lastActivity, 120);
-  }
-
-  // Update stats row
-  const statsEl = card.querySelector('.home-card-stats');
-  if (statsEl) {
-    statsEl.innerHTML = `
-      <span class="home-card-stat-current">${pane.currentTokPerSec} tok/s</span>
-      <span class="home-card-stat-sep">&middot;</span>
-      <span>avg ${pane.avgTokPerSec}</span>
-      <span class="home-card-stat-sep">&middot;</span>
-      <span>peak ${pane.peakTokPerSec}</span>
-    `;
-  }
-
-  // Update histogram chart
-  const canvas = card.querySelector('.home-card-chart') as HTMLCanvasElement | null;
-  if (canvas) {
-    drawCardHistogram(canvas, pane.histogram, pane.peakTokPerSec);
-  }
-
-  // Update activity timeline
-  const timelineEl = card.querySelector('.home-card-timeline') as HTMLElement | null;
-  if (timelineEl) {
-    drawCardTimeline(timelineEl, pane.activityTimeline);
-  }
-
-  // Update tokens
-  const tokensEl = card.querySelector('.home-card-tokens');
-  if (tokensEl) {
-    tokensEl.textContent = formatTokens(pane.totalTokens ?? 0);
-  }
-
-  // Update activity label
-  const actLabel = card.querySelector('.home-card-activity-label');
-  if (actLabel) {
-    actLabel.textContent = pane.activity !== 'idle' ? pane.activity : '';
-  }
-
-  // Update uptime
-  const uptimeEl = card.querySelector('.home-card-uptime');
-  if (uptimeEl) {
-    uptimeEl.textContent = formatUptime(pane.spawnedAt);
-  }
+function formatCompactStats(pane: DashboardPane): string {
+  const tok = formatTokens(pane.totalTokens);
+  const rate = pane.currentTokPerSec > 0 ? `${pane.currentTokPerSec} tok/s` : '';
+  const uptime = formatUptime(pane.spawnedAt);
+  return [tok, rate, uptime].filter(Boolean).join(' | ');
 }
 
 function formatUptime(spawnedAt: number): string {
@@ -435,16 +382,13 @@ function formatTokens(tokens: number): string {
   return `${(tokens / 1_000_000).toFixed(1)}M tok`;
 }
 
-function truncate(str: string, maxLen: number): string {
-  return str.length > maxLen ? str.slice(0, maxLen - 1) + '\u2026' : str;
-}
-
 export function destroyHomeScreen(): void {
   if (container) {
     container.innerHTML = '';
     container.className = '';
   }
   container = null;
+  canvasEl = null;
   navigateCb = null;
   currentPanes = [];
 }

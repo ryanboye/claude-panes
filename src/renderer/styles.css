@@ -1164,13 +1164,19 @@ body.panel-resizing iframe {
 
 /* ─── Home Screen Dashboard ────────────────────────────────── */
 
+/* Use #empty-state.home-screen to override #empty-state centering */
+#empty-state.home-screen {
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 0;
+  gap: 0;
+}
+
 .home-screen {
   flex: 1;
   overflow: hidden;
-  padding: 20px 24px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
 }
 
 .home-empty {
@@ -1193,78 +1199,118 @@ body.panel-resizing iframe {
   font-size: 13px;
 }
 
-.home-project-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+/* ─── Canvas Layout ────────────────────────────────────────── */
+
+.home-canvas {
+  position: relative;
+  overflow: auto;
   flex: 1;
   min-height: 0;
+  width: 100%;
+  background:
+    radial-gradient(circle, #2a2a4a 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
-.home-project-header {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--text-muted);
+/* ─── Canvas Card ──────────────────────────────────────────── */
+
+.canvas-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 300px;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  border: 2px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  overflow: hidden;
+}
+
+.canvas-card:hover {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+/* Status border colors */
+.canvas-card.status-working {
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(96, 165, 250, 0.12);
+}
+
+.canvas-card.status-idle {
+  opacity: 0.65;
+  border-color: var(--border-color);
+}
+
+.canvas-card.status-stuck {
+  border-color: var(--warning);
+  animation: canvas-stuck-pulse 2s ease-in-out infinite;
+}
+
+@keyframes canvas-stuck-pulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(251, 191, 36, 0.1); }
+  50% { box-shadow: 0 0 16px rgba(251, 191, 36, 0.35); }
+}
+
+.canvas-card.status-error {
+  border-color: var(--danger);
+  animation: canvas-error-pulse 2s ease-in-out infinite;
+}
+
+@keyframes canvas-error-pulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(255, 107, 107, 0.1); }
+  50% { box-shadow: 0 0 16px rgba(255, 107, 107, 0.35); }
+}
+
+.canvas-card.status-exited {
+  opacity: 0.5;
+  border-color: var(--text-muted);
+}
+
+/* ─── Card Titlebar ────────────────────────────────────────── */
+
+.canvas-card-titlebar {
+  height: 28px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  cursor: grab;
+  user-select: none;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.canvas-card-titlebar:active {
+  cursor: grabbing;
+}
+
+.canvas-card-dots {
+  display: flex;
+  gap: 4px;
   flex-shrink: 0;
 }
 
-.home-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  grid-auto-rows: min-content;
-  gap: 10px;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  align-content: start;
+.canvas-card-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: block;
 }
 
-.home-card {
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  border-left: 3px solid var(--text-muted);
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
+.canvas-card-dots span:nth-child(1) { background: #ff5f57; }
+.canvas-card-dots span:nth-child(2) { background: #febc2e; }
+.canvas-card-dots span:nth-child(3) { background: #28c840; }
 
-.home-card:hover {
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
-}
-
-.home-card.stuck {
-  border-left-color: var(--warning);
-  animation: stuck-card-pulse 2s ease-in-out infinite;
-}
-
-@keyframes stuck-card-pulse {
-  0%, 100% { box-shadow: 0 0 0 rgba(251, 191, 36, 0); }
-  50% { box-shadow: 0 0 12px rgba(251, 191, 36, 0.15); }
-}
-
-.home-card.exited {
-  opacity: 0.5;
-}
-
-.home-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  cursor: pointer;
-}
-
-.home-card-role {
+.canvas-card-role {
   font-weight: 600;
-  font-size: 12px;
+  font-size: 11px;
   text-transform: lowercase;
   letter-spacing: 0.5px;
 }
 
-.home-card-project {
+.canvas-card-project {
   font-size: 9px;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -1273,127 +1319,65 @@ body.panel-resizing iframe {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
-  text-align: center;
+  text-align: right;
 }
 
-.home-card-status {
-  font-size: 10px;
+.canvas-card-status {
+  font-size: 9px;
   font-weight: 500;
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-
-.home-card-status.status-running {
-  color: var(--success);
-  background: rgba(74, 222, 128, 0.1);
-}
-
-.home-card-status.status-stuck {
-  color: var(--warning);
-  background: rgba(251, 191, 36, 0.1);
-}
-
-.home-card-status.status-idle {
   color: var(--text-secondary);
-  background: rgba(136, 136, 170, 0.1);
 }
 
-.home-card-status.status-exited {
-  color: var(--text-muted);
-  background: rgba(85, 85, 119, 0.1);
-}
+/* ─── Card Preview ─────────────────────────────────────────── */
 
-.home-card-activity {
-  font-size: 11px;
-  color: var(--text-secondary);
-  line-height: 1.4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.home-card-stats {
-  display: flex;
-  align-items: center;
-  gap: 0;
+.canvas-card-preview {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
   font-size: 10px;
+  line-height: 1.5;
+  background: var(--bg-primary);
+  padding: 10px;
+  margin: 0;
+  overflow: hidden;
+  flex: 1;
+  min-height: 200px;
+  border-radius: 0;
   color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ─── Card Stats ───────────────────────────────────────────── */
+
+.canvas-card-stats {
+  font-size: 10px;
+  color: var(--text-muted);
+  padding: 6px 10px;
   font-variant-numeric: tabular-nums;
 }
 
-.home-card-stat-current {
-  color: var(--success);
-  font-weight: 600;
-}
+/* ─── Card Input ───────────────────────────────────────────── */
 
-.home-card-stat-sep {
-  margin: 0 5px;
-  color: var(--text-muted);
-}
-
-.home-card-chart-wrap {
-  height: 24px;
-}
-
-.home-card-chart {
-  display: block;
-  width: 100%;
-  height: 24px;
-  border-radius: 3px;
-}
-
-.home-card-timeline {
-  display: flex;
-  height: 3px;
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.home-card-timeline-seg {
-  min-width: 0;
-  transition: flex 0.3s ease;
-}
-
-.home-card-activity-label {
-  font-size: 10px;
-  color: var(--text-secondary);
-  text-transform: lowercase;
-}
-
-.home-card-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 10px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.home-card-question {
-  font-size: 11px;
-  color: var(--warning);
-  background: rgba(251, 191, 36, 0.08);
-  border-radius: 4px;
-  padding: 6px 8px;
-  line-height: 1.4;
-}
-
-.home-card-input {
+.canvas-card-input {
   width: 100%;
   background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  padding: 6px 8px;
+  border: none;
+  border-top: 1px solid var(--border-color);
+  padding: 6px 10px;
   color: var(--text-primary);
-  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 11px;
   outline: none;
-  transition: border-color 0.15s;
+  display: none;
 }
 
-.home-card-input:focus {
-  border-color: var(--accent);
+.canvas-card.needs-input .canvas-card-input {
+  display: block;
 }
 
-.home-card-input::placeholder {
+.canvas-card-input:focus {
+  background: rgba(26, 26, 46, 0.9);
+}
+
+.canvas-card-input::placeholder {
   color: var(--text-muted);
 }

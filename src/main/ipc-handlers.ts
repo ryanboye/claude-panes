@@ -70,6 +70,7 @@ export function registerIpcHandlers(
       isActiveBurn: boolean;
       histogram: number[];
       activityTimeline: string[];
+      lastSnippet: string[];
     }> = [];
     for (const [key, session] of sessions) {
       const snap = tokenTracker.getSnapshot(session.paneId);
@@ -84,6 +85,7 @@ export function registerIpcHandlers(
         isStuck: stuckDetector.isStuck(session.paneId),
         stuckQuestion: stuckDetector.getStuckContext(session.paneId),
         lastActivity: ptyManager.getLastOutputLine(key),
+        lastSnippet: ptyManager.getLastSnippet(key, 12),
         spawnedAt: session.spawnedAt,
         currentTokPerSec: snap?.currentTokPerSec ?? 0,
         avgTokPerSec: snap?.avgTokPerSec ?? 0,

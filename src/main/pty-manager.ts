@@ -25,9 +25,102 @@ export interface PtySession {
 // while preventing unbounded memory growth
 const OUTPUT_BUFFER_MAX_BYTES = 2 * 1024 * 1024;
 
+/**
+ * Render a single terminal line into plain text by interpreting cursor movement.
+ * Instead of stripping escape codes (which loses all spacing from cursor-positioned
+ * content like tables), this builds a character buffer honoring cursor column moves.
+ */
 function stripAnsi(str: string): string {
-  // eslint-disable-next-line no-control-regex
-  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+  const chars: string[] = [];
+  let col = 0;
+  let i = 0;
+
+  while (i < str.length) {
+    const ch = str.charCodeAt(i);
+
+    if (ch === 0x1b) { // ESC
+      if (str[i + 1] === '[') {
+        // CSI sequence — parse params + command
+        let j = i + 2;
+        let params = '';
+        while (j < str.length && str.charCodeAt(j) >= 0x30 && str.charCodeAt(j) <= 0x3f) {
+          params += str[j]; j++;
+        }
+        // Skip intermediate bytes (0x20-0x2F)
+        while (j < str.length && str.charCodeAt(j) >= 0x20 && str.charCodeAt(j) <= 0x2f) j++;
+        const cmd = j < str.length ? str[j] : '';
+        j++;
+
+        const cleanParams = params.replace(/^[\?>=]/, '');
+        const n = parseInt(cleanParams) || 1;
+
+        switch (cmd) {
+          case 'C': col += n; break;                          // cursor forward
+          case 'D': col = Math.max(0, col - n); break;       // cursor back
+          case 'G': col = Math.max(0, n - 1); break;         // absolute column (1-based)
+          case 'K':                                           // erase in line
+            if (cleanParams === '' || cleanParams === '0') {
+              chars.length = Math.min(chars.length, col);
+            } else if (cleanParams === '2') {
+              chars.length = 0; col = 0;
+            }
+            break;
+          // All other CSI (colors, modes, cursor visibility, etc.): skip
+        }
+        i = j;
+      } else if (str[i + 1] === ']') {
+        // OSC sequence — skip to BEL or ST
+        let j = i + 2;
+        while (j < str.length && str[j] !== '\x07' && !(str[j] === '\x1b' && str[j + 1] === '\\')) j++;
+        if (j < str.length && str[j] === '\x07') j++;
+        else if (j + 1 < str.length && str[j] === '\x1b' && str[j + 1] === '\\') j += 2;
+        i = j;
+      } else if (str[i + 1] === '(' || str[i + 1] === ')' || str[i + 1] === '#') {
+        i += 3; // charset / line attrs
+      } else {
+        i += 2; // ESC + single char
+      }
+    } else if (ch === 0x0d) { // \r — carriage return overwrites from col 0
+      col = 0;
+      i++;
+    } else if (ch < 0x20 || ch === 0x7f) {
+      i++; // skip other control chars
+    } else {
+      // Printable character — write at current column
+      while (chars.length <= col) chars.push(' ');
+      chars[col] = str[i];
+      col++;
+      i++;
+    }
+  }
+
+  return chars.join('');
+}
+
+/** Filter out lines that are mostly box-drawing or decoration junk */
+function isDecorationLine(line: string): boolean {
+  if (line.length === 0) return false;
+  let decorCount = 0;
+  for (let i = 0; i < line.length; i++) {
+    const code = line.charCodeAt(i);
+    // U+2500-257F Box Drawing, U+2580-259F Block Elements, U+25A0-25FF Geometric Shapes
+    if (code >= 0x2500 && code <= 0x25FF) decorCount++;
+  }
+  return decorCount / line.length > 0.5;
+}
+
+/** Filter out Claude CLI UI chrome lines that shouldn't appear in previews */
+function isChromeLine(line: string): boolean {
+  const l = line.toLowerCase();
+  return l.includes('esc to interrupt')
+    || l.includes('image in clipboard')
+    || l.includes('ctrl+v to paste')
+    || l.includes('? for shortcuts')
+    || /^[›>]\s*$/.test(line.trim())
+    // Thinking status lines (with optional leading spinner char)
+    || /^.{0,2}\(thinking\b/i.test(line)
+    // Very short lines that are spinner residue
+    || (line.length <= 2 && !/\w{2}/.test(line));
 }
 
 export class PtyManager {
@@ -192,6 +285,23 @@ export class PtyManager {
     return this.sessions;
   }
 
+  getLastSnippet(key: string, lineCount: number = 5): string[] {
+    const session = this.sessions.get(key);
+    if (!session) return [];
+    const recentChunks = session.outputBuffer.slice(-80).join('');
+    const lines = recentChunks.split('\n')
+      .map(l => stripAnsi(l).trim())
+      .filter(l => l.length > 0 && !isDecorationLine(l) && !isChromeLine(l));
+    // Deduplicate consecutive identical lines
+    const deduped: string[] = [];
+    for (const line of lines) {
+      if (deduped.length === 0 || line !== deduped[deduped.length - 1]) {
+        deduped.push(line);
+      }
+    }
+    return deduped.slice(-lineCount).map(l => l.length > 120 ? l.slice(0, 119) + '\u2026' : l);
+  }
+
   getLastOutputLine(key: string): string {
     const session = this.sessions.get(key);
     if (!session) return '';
@@ -201,7 +311,7 @@ export class PtyManager {
     const lines = recentChunks.split('\n');
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = stripAnsi(lines[i]).trim();
-      if (line.length > 0) return line;
+      if (line.length > 0 && !isDecorationLine(line) && !isChromeLine(line)) return line;
     }
     return '';
   }
